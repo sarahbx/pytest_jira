@@ -7,17 +7,16 @@ You must set the url either at the command line or in jira.cfg.
 
 Author: James Laska
 """
-
 import os
 import re
 import sys
+import time
 from packaging.version import Version
 from json import JSONDecodeError
 
 import pytest
 import requests
 import six
-from retry import retry
 
 from issue_model import JiraIssue, JiraIssueSchema
 
@@ -239,15 +238,25 @@ class JiraSiteConnection(object):
             self.is_connected = True
             return True
 
-    @retry(JSONDecodeError, tries=3, delay=2)
-    def get_issue(self, issue_id, return_jira_metadata):
-        if not self.is_connected:
-            self.check_connection()
+    def get_issue_data(self, issue_id, tries=3, delay=2):
         issue_url = '{url}/rest/api/2/issue/{issue_id}'.format(
             url=self.url, issue_id=issue_id
         )
-        issue = self._jira_request(issue_url).json()
-        field = issue['fields']
+        for iteration in range(tries+1):
+            issue_response = self._jira_request(issue_url)
+            try:
+                return issue_response.json()
+            except JSONDecodeError:
+                if iteration < tries:
+                    time.sleep(delay)
+                else:
+                    raise
+
+    def get_issue(self, issue_id, return_jira_metadata):
+        if not self.is_connected:
+            self.check_connection()
+        issue_data = self.get_issue_data(issue_id=issue_id)
+        field = issue_data['fields']
         return field if return_jira_metadata else \
             {
                 'components': set(
